@@ -27,6 +27,7 @@ input:focus,textarea:focus,select:focus{outline:none;border-color:var(--pink)!im
 @keyframes fadeIn{from{opacity:0;transform:translateY(12px)}to{opacity:1;transform:translateY(0)}}
 @keyframes slideIn{from{opacity:0;transform:translateX(16px)}to{opacity:1;transform:translateX(0)}}
 @keyframes toastIn{from{opacity:0;transform:translateY(16px) translateX(-50%)}to{opacity:1;transform:translateY(0) translateX(-50%)}}
+@keyframes shimmer{0%{opacity:0.4}50%{opacity:0.7}100%{opacity:0.4}}
 
 /* ── Header ── */
 .header{background:linear-gradient(180deg,rgba(255,140,160,0.06) 0%,var(--bg) 100%);padding:24px 28px;position:sticky;top:0;z-index:100;backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px);border-bottom:1px solid var(--border)}
@@ -173,11 +174,26 @@ label.label{display:block;font-size:12px;font-weight:700;color:var(--text-dim);m
 </style>
 </head>
 <body>
-<div id="app"></div>
+<div id="app"><div style="text-align:center;padding:80px 20px"><div style="font-size:48px;margin-bottom:12px">🍳</div><p style="color:#6a6a82;font-size:14px">Loading cookbook…</p></div></div>
 
+<script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-database-compat.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.9/babel.min.js"></script>
+<script>
+// Initialize Firebase before React loads
+const fbApp = firebase.initializeApp({
+  apiKey: "AIzaSyAx6LjPOQ-gMIOZ2ree3hUeNxXW9vbKvvg",
+  authDomain: "pratt-cookbook.firebaseapp.com",
+  databaseURL: "https://pratt-cookbook-default-rtdb.firebaseio.com",
+  projectId: "pratt-cookbook",
+  storageBucket: "pratt-cookbook.firebasestorage.app",
+  messagingSenderId: "593099318400",
+  appId: "1:593099318400:web:04af38d9d1d40d65007265"
+});
+const fbDb = firebase.database();
+</script>
 <script type="text/babel">
 const { useState, useEffect, useRef } = React;
 
@@ -216,11 +232,17 @@ const SAMPLE_RECIPES = [{
 
 const uid = () => Math.random().toString(36).slice(2, 10);
 
-function loadRecipes(){try{const d=localStorage.getItem("pratt-cookbook-recipes");return d?JSON.parse(d):null}catch(e){return null}}
-function saveRecipes(r){try{localStorage.setItem("pratt-cookbook-recipes",JSON.stringify(r))}catch(e){}}
+// Firebase helpers
+function fbSaveRecipe(recipe) {
+  fbDb.ref("recipes/" + recipe.id).set(recipe);
+}
+function fbDeleteRecipe(id) {
+  fbDb.ref("recipes/" + id).remove();
+}
 
 function App(){
-  const [recipes,setRecipes]=useState(()=>loadRecipes()||SAMPLE_RECIPES);
+  const [recipes,setRecipes]=useState([]);
+  const [loaded,setLoaded]=useState(false);
   const [view,setView]=useState("grid");
   const [selected,setSelected]=useState(null);
   const [editing,setEditing]=useState(null);
@@ -229,8 +251,29 @@ function App(){
   const [delId,setDelId]=useState(null);
   const [toast,setToast]=useState(null);
   const [gfOnly,setGfOnly]=useState(false);
+  const [syncStatus,setSyncStatus]=useState("syncing");
 
-  useEffect(()=>{saveRecipes(recipes)},[recipes]);
+  // Firebase listener
+  useEffect(()=>{
+    const recipesRef = fbDb.ref("recipes");
+    recipesRef.on("value", snap => {
+      const val = snap.val();
+      if(!val){
+        // First time — seed with sample recipe
+        SAMPLE_RECIPES.forEach(r => fbDb.ref("recipes/" + r.id).set(r));
+      } else {
+        setRecipes(Object.values(val));
+      }
+      setLoaded(true);
+      setSyncStatus("synced");
+    }, err => {
+      console.warn("Firebase error:", err);
+      setSyncStatus("offline");
+      setLoaded(true);
+    });
+    return () => recipesRef.off();
+  }, []);
+
   const showToast=m=>{setToast(m);setTimeout(()=>setToast(null),2500)};
 
   const filtered=recipes.filter(r=>{
@@ -246,11 +289,17 @@ function App(){
   const back=()=>{setView("grid");setSelected(null);setEditing(null)};
 
   const saveR=recipe=>{
-    if(editing){setRecipes(p=>p.map(r=>r.id===recipe.id?recipe:r));showToast("Recipe updated!")}
-    else{setRecipes(p=>[...p,{...recipe,id:uid(),dateAdded:new Date().toISOString().slice(0,10)}]);showToast("Recipe added!")}
+    if(editing){
+      fbSaveRecipe(recipe);
+      showToast("Recipe updated!");
+    } else {
+      const newRecipe = {...recipe, id:uid(), dateAdded:new Date().toISOString().slice(0,10)};
+      fbSaveRecipe(newRecipe);
+      showToast("Recipe added!");
+    }
     back();
   };
-  const delR=id=>{setRecipes(p=>p.filter(r=>r.id!==id));setDelId(null);showToast("Recipe removed");back()};
+  const delR=id=>{fbDeleteRecipe(id);setDelId(null);showToast("Recipe removed");back()};
 
   const printR=()=>{
     const r=selected;const w=window.open("","_blank");if(!w)return;
@@ -270,9 +319,16 @@ function App(){
   return(
     <div>
       {toast&&<div className="toast">{toast}</div>}
-      {view==="grid"&&<GridView recipes={filtered} search={search} setSearch={setSearch} cat={cat} setCat={setCat} gfOnly={gfOnly} setGfOnly={setGfOnly} onOpen={openR} onNew={newR} total={recipes.length}/>}
+      {!loaded ? (
+        <div>
+          <div className="header"><div className="header-inner"><div className="header-left"><div className="logo-mark">🍳</div><div className="header-text"><a href="https://mpratt1809.github.io/hub/" className="back-link">← PRATTHUB</a><h1>Family Cookbook</h1><p className="sub">Syncing…</p></div></div></div></div>
+          <div className="controls" style={{padding:"24px 28px"}}><div style={{height:52,borderRadius:12,background:"var(--card)",border:"1px solid var(--border)",marginBottom:8,animation:"shimmer 1.5s infinite"}}></div><div style={{height:52,borderRadius:12,background:"var(--card)",border:"1px solid var(--border)",animation:"shimmer 1.5s infinite"}}></div></div>
+        </div>
+      ) : (
+        <>
+      {view==="grid"&&<GridView recipes={filtered} search={search} setSearch={setSearch} cat={cat} setCat={setCat} gfOnly={gfOnly} setGfOnly={setGfOnly} onOpen={openR} onNew={newR} total={recipes.length} syncStatus={syncStatus}/>}
       {view==="detail"&&selected&&<DetailView r={selected} onBack={back} onEdit={()=>editR(selected)} onDelete={()=>setDelId(selected.id)} onPrint={printR}
-        onPhotos={(p,m)=>{const u={...selected,photos:p,photoMemories:m};setRecipes(prev=>prev.map(r=>r.id===u.id?u:r));setSelected(u)}}/>}
+        onPhotos={(p,m)=>{const u={...selected,photos:p,photoMemories:m};fbSaveRecipe(u);setSelected(u)}}/>}
       {view==="form"&&<RecipeForm recipe={editing} onSave={saveR} onCancel={back}/>}
       {delId&&(
         <div className="modal-overlay" onClick={()=>setDelId(null)}>
@@ -286,12 +342,14 @@ function App(){
           </div>
         </div>
       )}
+        </>
+      )}
     </div>
   );
 }
 
 /* ═══ GRID ═══ */
-function GridView({recipes,search,setSearch,cat,setCat,gfOnly,setGfOnly,onOpen,onNew,total}){
+function GridView({recipes,search,setSearch,cat,setCat,gfOnly,setGfOnly,onOpen,onNew,total,syncStatus}){
   return(
     <div>
       <div className="header">
@@ -304,7 +362,10 @@ function GridView({recipes,search,setSearch,cat,setCat,gfOnly,setGfOnly,onOpen,o
               <p className="sub">{total} recipe{total!==1?"s":""} and counting</p>
             </div>
           </div>
-          <button className="btn btn-primary" onClick={onNew}>+ Add Recipe</button>
+          <div style={{display:"flex",alignItems:"center",gap:10}}>
+            <span style={{fontSize:11,color:syncStatus==="synced"?"#4ade80":"#fbbf24",background:syncStatus==="synced"?"rgba(74,222,128,0.1)":"rgba(251,191,36,0.1)",border:"1px solid "+(syncStatus==="synced"?"rgba(74,222,128,0.2)":"rgba(251,191,36,0.2)"),borderRadius:20,padding:"3px 10px",fontWeight:600}}>{syncStatus==="synced"?"🔴 Live":"⚠️ Offline"}</span>
+            <button className="btn btn-primary" onClick={onNew}>+ Add Recipe</button>
+          </div>
         </div>
       </div>
       <div className="controls">

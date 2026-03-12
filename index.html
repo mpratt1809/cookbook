@@ -138,6 +138,13 @@ label.label{display:block;font-size:12px;font-weight:700;color:var(--text-dim);m
 .modal p{color:var(--text-dim);font-size:14px;margin-bottom:20px;line-height:1.5}
 .modal-actions{display:flex;gap:10px;justify-content:flex-end}
 
+/* ── GF Toggle & Badge ── */
+.gf-toggle{display:inline-flex;align-items:center;gap:6px;padding:7px 16px;border-radius:20px;border:1px solid rgba(130,220,130,0.2);background:transparent;color:var(--green);font-size:13px;font-weight:600;cursor:pointer;font-family:var(--font);transition:all 0.25s;white-space:nowrap}
+.gf-toggle:hover{border-color:rgba(130,220,130,0.4);background:rgba(130,220,130,0.06)}
+.gf-toggle.active{background:var(--green);color:#0a0a0f;border-color:var(--green)}
+.gf-icon{font-weight:800;font-size:11px;letter-spacing:0.5px}
+.gf-badge{display:inline-flex;align-items:center;justify-content:center;padding:2px 7px;border-radius:6px;font-size:10px;font-weight:800;letter-spacing:0.5px;background:rgba(130,220,130,0.15);color:var(--green);line-height:1}
+
 /* ── Empty ── */
 .empty-state{grid-column:1/-1;text-align:center;padding:60px 20px}
 .empty-state h3{font-size:20px;font-weight:700;color:var(--text);margin-top:16px}
@@ -174,12 +181,12 @@ label.label{display:block;font-size:12px;font-weight:700;color:var(--text-dim);m
 <script type="text/babel">
 const { useState, useEffect, useRef } = React;
 
-const CATEGORIES = ["All Recipes","Grandma's Classics","Holiday Favorites","Weeknight Dinners","Desserts & Sweets","Breakfast & Brunch","Sides & Salads","Family Originals"];
+const CATEGORIES = ["All Recipes","Breakfast","Lunch","Dinner","Healthy Desserts","Desserts","Snacks","Sauces","Beverages — Alcoholic","Beverages — Non-Alcoholic"];
 const UNITS = ["","tsp","tbsp","cup","oz","lb","g","kg","ml","L","pinch","dash","whole","slice","clove","can","bunch","pkg"];
 const FAMILY_MEMBERS = ["Sky","Meagan","Grandma","Grandpa","Mom","Dad","Custom"];
 
 const SAMPLE_RECIPES = [{
-  id:"sample-1",title:"Grandma's Chocolate Chip Cookies",category:"Grandma's Classics",
+  id:"sample-1",title:"Grandma's Chocolate Chip Cookies",category:"Desserts",
   description:"The recipe that started it all. Crispy edges, chewy centers, and that secret touch of love only Grandma could add.",
   servings:36,prepTime:"15 min",cookTime:"12 min",
   ingredients:[
@@ -204,7 +211,7 @@ const SAMPLE_RECIPES = [{
     "Bake 9-12 minutes until golden brown. Let cool on pan for 5 minutes.",
   ],
   notes:"Grandma's secret: chill the dough for 30 minutes before baking for thicker cookies.",
-  addedBy:"Grandma",dateAdded:"2024-01-15",photos:[],photoMemories:[]
+  addedBy:"Grandma",dateAdded:"2024-01-15",glutenFree:false,photos:[],photoMemories:[]
 }];
 
 const uid = () => Math.random().toString(36).slice(2, 10);
@@ -221,6 +228,7 @@ function App(){
   const [cat,setCat]=useState("All Recipes");
   const [delId,setDelId]=useState(null);
   const [toast,setToast]=useState(null);
+  const [gfOnly,setGfOnly]=useState(false);
 
   useEffect(()=>{saveRecipes(recipes)},[recipes]);
   const showToast=m=>{setToast(m);setTimeout(()=>setToast(null),2500)};
@@ -228,7 +236,8 @@ function App(){
   const filtered=recipes.filter(r=>{
     const mc=cat==="All Recipes"||r.category===cat;
     const ms=!search||r.title.toLowerCase().includes(search.toLowerCase())||r.ingredients.some(i=>i.name.toLowerCase().includes(search.toLowerCase()))||(r.addedBy&&r.addedBy.toLowerCase().includes(search.toLowerCase()));
-    return mc&&ms;
+    const mg=!gfOnly||r.glutenFree;
+    return mc&&ms&&mg;
   });
 
   const openR=r=>{setSelected(r);setView("detail")};
@@ -261,7 +270,7 @@ function App(){
   return(
     <div>
       {toast&&<div className="toast">{toast}</div>}
-      {view==="grid"&&<GridView recipes={filtered} search={search} setSearch={setSearch} cat={cat} setCat={setCat} onOpen={openR} onNew={newR} total={recipes.length}/>}
+      {view==="grid"&&<GridView recipes={filtered} search={search} setSearch={setSearch} cat={cat} setCat={setCat} gfOnly={gfOnly} setGfOnly={setGfOnly} onOpen={openR} onNew={newR} total={recipes.length}/>}
       {view==="detail"&&selected&&<DetailView r={selected} onBack={back} onEdit={()=>editR(selected)} onDelete={()=>setDelId(selected.id)} onPrint={printR}
         onPhotos={(p,m)=>{const u={...selected,photos:p,photoMemories:m};setRecipes(prev=>prev.map(r=>r.id===u.id?u:r));setSelected(u)}}/>}
       {view==="form"&&<RecipeForm recipe={editing} onSave={saveR} onCancel={back}/>}
@@ -282,7 +291,7 @@ function App(){
 }
 
 /* ═══ GRID ═══ */
-function GridView({recipes,search,setSearch,cat,setCat,onOpen,onNew,total}){
+function GridView({recipes,search,setSearch,cat,setCat,gfOnly,setGfOnly,onOpen,onNew,total}){
   return(
     <div>
       <div className="header">
@@ -304,8 +313,13 @@ function GridView({recipes,search,setSearch,cat,setCat,onOpen,onNew,total}){
           <input type="text" placeholder="Search recipes, ingredients, or family members..." value={search} onChange={e=>setSearch(e.target.value)}/>
           {search&&<button className="search-clear" onClick={()=>setSearch("")}>✕</button>}
         </div>
-        <div className="cat-row">
-          {CATEGORIES.map(c=><button key={c} className={`cat-btn${cat===c?" active":""}`} onClick={()=>setCat(c)}>{c}</button>)}
+        <div style={{display:"flex",alignItems:"center",flexWrap:"wrap",gap:8,marginTop:16}}>
+          <div className="cat-row" style={{marginTop:0,flex:1}}>
+            {CATEGORIES.map(c=><button key={c} className={`cat-btn${cat===c?" active":""}`} onClick={()=>setCat(c)}>{c}</button>)}
+          </div>
+          <button className={`gf-toggle${gfOnly?" active":""}`} onClick={()=>setGfOnly(!gfOnly)}>
+            <span className="gf-icon">GF</span> Gluten Free
+          </button>
         </div>
       </div>
       <div className="grid">
@@ -313,13 +327,16 @@ function GridView({recipes,search,setSearch,cat,setCat,onOpen,onNew,total}){
           <div className="empty-state">
             <div style={{fontSize:48}}>📖</div>
             <h3>No recipes found</h3>
-            <p>{search?"Try a different search":"Add your first family recipe to get started!"}</p>
+            <p>{search||gfOnly?"Try adjusting your filters":"Add your first family recipe to get started!"}</p>
           </div>
         ):recipes.map((r,i)=>(
           <div key={r.id} className="card" onClick={()=>onOpen(r)} style={{animationDelay:`${i*0.06}s`}}>
             {r.photos&&r.photos.length>0?<div className="card-img"><img src={r.photos[0]} alt=""/></div>:<div className="card-img-placeholder">🍽️</div>}
             <div className="card-body">
-              <span className="card-cat">{r.category}</span>
+              <div style={{display:"flex",alignItems:"center",gap:8}}>
+                <span className="card-cat">{r.category}</span>
+                {r.glutenFree&&<span className="gf-badge">GF</span>}
+              </div>
               <h3 className="card-title">{r.title}</h3>
               <p className="card-desc">{r.description?r.description.slice(0,80)+(r.description.length>80?"...":""):"A family favorite"}</p>
               <div className="card-meta">
@@ -354,7 +371,7 @@ function DetailView({r,onBack,onEdit,onDelete,onPrint,onPhotos}){
         </div>
       </div>
       <div style={{marginBottom:32}}>
-        <span className="detail-cat">{r.category}</span>
+        <span className="detail-cat">{r.category}{r.glutenFree&&<span className="gf-badge" style={{marginLeft:8,position:"relative",top:-1}}>GF</span>}</span>
         <h1 className="detail-title">{r.title}</h1>
         {r.description&&<p className="detail-desc">{r.description}</p>}
         <div className="detail-meta">
@@ -393,7 +410,7 @@ function DetailView({r,onBack,onEdit,onDelete,onPrint,onPhotos}){
 
 /* ═══ FORM ═══ */
 function RecipeForm({recipe,onSave,onCancel}){
-  const [form,setForm]=useState(recipe||{id:"",title:"",category:CATEGORIES[1],description:"",servings:4,prepTime:"",cookTime:"",ingredients:[{id:uid(),name:"",amount:"",unit:""}],steps:[""],notes:"",addedBy:"",customAddedBy:"",photos:[],photoMemories:[]});
+  const [form,setForm]=useState(recipe||{id:"",title:"",category:CATEGORIES[1],description:"",servings:4,prepTime:"",cookTime:"",glutenFree:false,ingredients:[{id:uid(),name:"",amount:"",unit:""}],steps:[""],notes:"",addedBy:"",customAddedBy:"",photos:[],photoMemories:[]});
   const [showC,setShowC]=useState(false);
   const set=(k,v)=>setForm(f=>({...f,[k]:v}));
   const addI=()=>set("ingredients",[...form.ingredients,{id:uid(),name:"",amount:"",unit:""}]);
@@ -422,6 +439,12 @@ function RecipeForm({recipe,onSave,onCancel}){
           <div className="form-group"><label className="label">Prep Time</label><input className="input" value={form.prepTime} onChange={e=>set("prepTime",e.target.value)} placeholder="e.g. 15 min"/></div>
           <div className="form-group"><label className="label">Cook Time</label><input className="input" value={form.cookTime} onChange={e=>set("cookTime",e.target.value)} placeholder="e.g. 45 min"/></div>
           <div className="form-group"><label className="label">Servings</label><input className="input" type="number" value={form.servings} onChange={e=>set("servings",e.target.value)}/></div>
+        </div>
+        <div className="form-group">
+          <label className="label">Dietary</label>
+          <button type="button" className={`gf-toggle${form.glutenFree?" active":""}`} onClick={()=>set("glutenFree",!form.glutenFree)} style={{marginTop:2}}>
+            <span className="gf-icon">GF</span> Gluten Free {form.glutenFree?"✓":""}
+          </button>
         </div>
         <div className="form-group">
           <label className="label">Ingredients</label>
